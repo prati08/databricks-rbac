@@ -23,6 +23,43 @@ flowchart LR
 
 ---
 
+## Authentication Methods
+
+How identities authenticate to Databricks workspaces.
+
+| Method | Used By | Notes |
+|---|---|---|
+| **SSO (Single Sign-On)** | Users | Recommended. Integrates with Okta, Azure AD, Google, etc. |
+| **Personal Access Token (PAT)** | Users, Service Principals | Long-lived tokens; inherit full user permissions; no fine-grained scopes |
+| **OAuth (M2M)** | Service Principals | Short-lived tokens (1h); preferred for automation |
+| **OAuth (U2M)** | Users | Browser-based OAuth flow for CLI/SDK |
+| **Password** | Users (emergency only) | Max 20 users; only when SSO is unavailable |
+
+---
+
+## SCIM Provisioning
+
+SCIM (System for Cross-domain Identity Management) automates user and group sync from an external identity provider into Databricks.
+
+```mermaid
+flowchart LR
+    IDP["Identity Provider<br/>(Okta, Azure AD, Google)"] -->|"SCIM sync"| A["Databricks Account<br/>Users and Groups"]
+    A -->|"workspace assignment"| W1["Workspace 1"]
+    A -->|"workspace assignment"| W2["Workspace 2"]
+    A -->|"workspace assignment"| W3["Workspace N"]
+```
+
+| Action | Who Controls |
+|---|---|
+| Enable SCIM | Account Admin |
+| Push users/groups | Identity Provider (automated) |
+| Deprovision users | Identity Provider (automated) — removes workspace access |
+| Override sync | Account Admin (manual edits) |
+
+> Users provisioned via SCIM **cannot** set passwords in Databricks — authentication is always via the IdP.
+
+---
+
 ## Account-Level Roles
 
 Roles assigned at the Databricks **account** scope. Collected via `AccountClient`.
@@ -77,6 +114,29 @@ flowchart TD
 | **Workspace Access** | `workspace_access` | `workspace:read`, `cluster:create`, `job:create`, `notebook:create`, `sql:read`, `experiment:create` | Standard user access — create and manage own resources |
 | **Databricks SQL Access** | `databricks_sql_access` | `workspace:access`, `sql:access`, `shared_directory:manage` | Default group for all workspace users — grants SQL and workspace access entitlements |
 | **Consumer Access** | `consumer_access` | `workspace:manage`, `token:manage`, `cluster:manage`, `job:manage`, `unity_catalog:manage` | Default group for workspace admins — management over tokens, clusters, jobs, and Unity Catalog |
+
+---
+
+## Account ↔ Workspace Role Relationship
+
+Account-level roles do not automatically grant workspace-level permissions. Access must be explicitly assigned at each level.
+
+```mermaid
+flowchart TD
+    AA["Account Admin"] -->|"can assign users to workspaces"| WA["Workspace Admin"]
+    AA -->|"can assign"| WU["Workspace User"]
+    WA -->|"auto gets"| CM["CAN MANAGE on all workspace objects"]
+    WU -->|"gets only"| EP["Explicitly granted permissions per object"]
+    AA -->|"does NOT automatically get"| WA2["Workspace-level access<br/>unless also added to workspace"]
+```
+
+| Account Role | Workspace Access Granted? |
+|---|---|
+| **Account Admin** | Not automatic — must be added to each workspace |
+| **Marketplace Admin** | No workspace access |
+| **Billing Admin** | No workspace access |
+| **Workspace Creator** | Can create workspaces but not automatically a member |
+| **Workspace Manager** | Can manage workspace config but not automatically a member |
 
 ---
 
@@ -294,6 +354,148 @@ flowchart TD
 
 ---
 
+## Instance Pools
+
+Shared compute pools that reduce cluster start times. Created from the **Compute** sidebar section.
+
+| Permission | Can Do | Auto-granted To |
+|---|---|---|
+| `CAN ATTACH TO` | Create clusters from the pool | — |
+| `CAN MANAGE` | Edit, delete pool, set permissions | Creator, Workspace Admin |
+
+---
+
+## Cluster Policies
+
+Policies that restrict which cluster configurations users can create. Managed by admins.
+
+| Permission | Can Do | Auto-granted To |
+|---|---|---|
+| `CAN USE` | Create clusters using this policy | — |
+
+> Only **Workspace Admins** can create or modify cluster policies. Regular users can only use policies they are granted `CAN USE` on.
+
+```mermaid
+flowchart LR
+    WA["Workspace Admin<br/>Creates policy"] --> P["Cluster Policy<br/>(limits config options)"]
+    P -->|"CAN USE granted to"| U["User / Group / SP"]
+    U -->|"can only create clusters within policy limits"| C["Cluster"]
+```
+
+---
+
+## Secret Scopes
+
+Secure storage for credentials, API keys, and passwords. Accessible from notebooks and jobs.
+
+| Permission | Can Do | Auto-granted To |
+|---|---|---|
+| `READ` | Read secret values in code | — |
+| `WRITE` | Add/update secrets in scope | — |
+| `MANAGE` | Delete scope, manage ACL, list secrets | Creator, Workspace Admin |
+
+> Secret **values** are never returned as plaintext in the UI. Only code running on a cluster can read them. Workspace Admins can manage all scopes.
+
+```mermaid
+flowchart LR
+    U["User / SP with READ"] -->|"dbutils.secrets.get()"| S["Secret Scope"]
+    S -->|"returns redacted value only in logs"| C["Cluster / Job"]
+    WA["Workspace Admin"] -->|"MANAGE"| S
+```
+
+---
+
+## Token Access Model
+
+Personal Access Tokens (PATs) and Service Principal Tokens collected by Voyager.
+
+| Token Type | Created By | Inherits | Expiry | Scope |
+|---|---|---|---|---|
+| **Personal Access Token (PAT)** | User | All user permissions | Configurable (default: no expiry) | No fine-grained scopes |
+| **Service Principal Token (OAuth)** | Service Principal | SP permissions | 1 hour (auto-refresh) | All APIs |
+| **Service Principal Token (PAT)** | Workspace Admin / SP Manager | SP permissions | Configurable | No fine-grained scopes |
+
+```mermaid
+flowchart TD
+    WA["Workspace Admin"] -->|"can create tokens for"| SP["Service Principal"]
+    WA -->|"can revoke any token"| T["Tokens"]
+    U["User"] -->|"creates own PAT"| UT["User PAT<br/>(inherits user permissions)"]
+    SP -->|"OAuth flow"| OT["OAuth Token<br/>(1h, auto-refresh)"]
+```
+
+> Workspace Admins can view and revoke **all** tokens in the workspace via **Settings → Developer → Access tokens**.
+
+---
+
+## Model Serving Endpoints
+
+REST endpoints for deploying ML models and LLMs.
+
+| Permission | Can Do | Auto-granted To |
+|---|---|---|
+| `CAN VIEW` | View endpoint details and metrics | — |
+| `CAN QUERY` | Send inference requests to endpoint | — |
+| `CAN MANAGE` | Create, update, delete endpoint, set permissions | Creator, Workspace Admin |
+
+> Requires Unity Catalog `EXECUTE` privilege on the underlying model to serve it.
+
+---
+
+## Delta Sharing
+
+Share live data across organizations and clouds without copying it.
+
+| Role | Scope | Can Do |
+|---|---|---|
+| **Metastore Admin** | Metastore | Create/manage shares and recipients |
+| **Share owner** | Share | Add tables/schemas to share, manage recipients |
+| **Recipient** | Share | Read shared data via open sharing protocol |
+
+```mermaid
+flowchart LR
+    P["Provider<br/>(Databricks Metastore)"] -->|"creates share"| S["Share<br/>(tables, schemas)"]
+    S -->|"grants access to"| R["Recipient<br/>(any platform)"]
+    R -->|"reads via Delta Sharing protocol"| D["Shared Data<br/>(live, no copy)"]
+```
+
+---
+
+## Databricks Apps
+
+Hosted web applications built on workspace data, deployed directly in Databricks.
+
+| Permission | Can Do | Auto-granted To |
+|---|---|---|
+| `CAN VIEW` | Access and use the app | — |
+| `CAN MANAGE` | Deploy, update, delete app, set permissions | Creator, Workspace Admin |
+
+> Apps run as a **service principal** — the app's SP must have Unity Catalog access to the data it uses.
+
+---
+
+## IP Access Lists
+
+Workspace-level network restriction. Managed only by **Workspace Admins**.
+
+```mermaid
+flowchart LR
+    R["Incoming Request"] --> CK{"IP in allowlist?"}
+    CK -->|"Yes"| A["Access Granted"]
+    CK -->|"No"| D["Access Denied<br/>(403)"]
+    WA["Workspace Admin"] -->|"manages"| AL["IP Allowlist / Blocklist"]
+    AL --> CK
+```
+
+| Action | Who Can Do It |
+|---|---|
+| Enable IP access lists | Workspace Admin |
+| Add/remove IPs | Workspace Admin |
+| Bypass (emergency) | Account Admin via account console |
+
+> IP access lists apply to **all** users including admins. Ensure admin IPs are always included before enabling.
+
+---
+
 ## Unity Catalog (Metastore-Level)
 
 Unity Catalog provides centralized governance across all workspaces in a region using standard ANSI SQL security.
@@ -403,6 +605,35 @@ flowchart LR
 | `APPLY TAG` | Tag models |
 | `CREATE MODEL VERSION` | Create new model versions |
 | `MANAGE` | Full control |
+
+### Metastore Admin
+
+A distinct role separate from Account Admin and Workspace Admin.
+
+| Capability | Metastore Admin |
+|---|---|
+| Assign metastore to workspaces | ✓ |
+| Create/manage catalogs | ✓ |
+| Grant privileges on any object | ✓ |
+| Manage Delta Sharing (shares, recipients) | ✓ |
+| Create storage credentials and external locations | ✓ |
+| View all Unity Catalog audit logs | ✓ |
+
+> Metastore Admin is assigned per metastore, not per workspace. One account can have multiple metastores (one per region).
+
+### USE CATALOG Privilege
+
+Required before any schema or table access. Often overlooked.
+
+```mermaid
+flowchart LR
+    UC["USE CATALOG<br/>(required first)"] --> US["USE SCHEMA<br/>(required second)"] --> D["Data Access<br/>(SELECT, MODIFY, etc.)"]
+```
+
+| Without | Result |
+|---|---|
+| `USE CATALOG` | Cannot access any schema or table in the catalog |
+| `USE SCHEMA` | Cannot access any table in the schema, even with `SELECT` |
 
 ### Who Can Grant Unity Catalog Privileges
 
@@ -570,3 +801,12 @@ flowchart LR
 - [Unity Catalog Privileges](https://docs.databricks.com/aws/en/data-governance/unity-catalog/manage-privileges/privileges.html)
 - [Compute Access Control](https://docs.databricks.com/aws/en/compute/access-control.html)
 - [Jobs Access Control](https://docs.databricks.com/aws/en/jobs/access-control.html)
+- [Secret Scopes](https://docs.databricks.com/aws/en/security/secrets/secret-acl.html)
+- [IP Access Lists](https://docs.databricks.com/aws/en/security/network/front-end/ip-access-list.html)
+- [Token Management](https://docs.databricks.com/aws/en/admin/access-control/tokens.html)
+- [Model Serving Access Control](https://docs.databricks.com/aws/en/machine-learning/model-serving/manage-serving-endpoints.html)
+- [Delta Sharing](https://docs.databricks.com/aws/en/delta-sharing/index.html)
+- [Cluster Policies](https://docs.databricks.com/aws/en/compute/cluster-policy.html)
+- [Instance Pools](https://docs.databricks.com/aws/en/compute/pool-index.html)
+- [SCIM Provisioning](https://docs.databricks.com/aws/en/admin/users-groups/scim/index.html)
+- [Databricks Apps](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/index.html)
