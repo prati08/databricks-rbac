@@ -98,6 +98,58 @@ flowchart TD
 
 Roles assigned at the Databricks **workspace** scope. Collected via `WorkspaceClient`.
 
+### Workspace Access vs SQL Access vs Consumer Access
+
+The three workspace entitlement roles serve completely different purposes and are often confused.
+
+```mermaid
+flowchart TD
+    subgraph WA["Workspace Access — I build things"]
+        WA1["Notebooks"]
+        WA2["Create Clusters"]
+        WA3["Create Jobs"]
+        WA4["MLflow Experiments"]
+    end
+
+    subgraph SA["SQL Access — I query things"]
+        SA1["SQL Editor"]
+        SA2["Dashboards"]
+        SA3["Queries"]
+        SA4["Alerts / Genie Space"]
+    end
+
+    subgraph CA["Consumer Access — I govern things (Admins only)"]
+        CA1["Manage Tokens"]
+        CA2["CAN MANAGE all Clusters"]
+        CA3["CAN MANAGE all Jobs"]
+        CA4["Unity Catalog manage"]
+    end
+```
+
+| Capability | Workspace Access | SQL Access | Consumer Access |
+|---|---|---|---|
+| **Who gets it by default** | All new users | All new users | Workspace Admins only |
+| Notebooks | ✓ | — | — |
+| Create clusters | ✓ | — | — |
+| Create jobs | ✓ | — | — |
+| MLflow experiments | ✓ | — | — |
+| SQL Editor | — | ✓ | — |
+| Dashboards / Queries / Alerts | — | ✓ | — |
+| Genie Space | — | ✓ | — |
+| Manage tokens | — | — | ✓ |
+| CAN MANAGE all clusters | — | — | ✓ |
+| CAN MANAGE all jobs | — | — | ✓ |
+| Unity Catalog manage | — | — | ✓ |
+
+| Role | Typical user |
+|---|---|
+| **Workspace Access only** | Data engineer, ML engineer running notebooks |
+| **SQL Access only** | Analyst, BI developer querying data |
+| **Both** | Full-stack data engineer |
+| **Consumer Access** | Workspace admin only |
+
+> **Important**: These entitlements are just **doors into the UI**. They do not grant access to compute or data — see below.
+
 ```mermaid
 flowchart TD
     W["Databricks Workspace"] --> E1["Admin Access<br/>workspace:manage, user:manage<br/>cluster:manage, job:manage"]
@@ -114,6 +166,73 @@ flowchart TD
 | **Workspace Access** | `workspace_access` | `workspace:read`, `cluster:create`, `job:create`, `notebook:create`, `sql:read`, `experiment:create` | Standard user access — create and manage own resources |
 | **Databricks SQL Access** | `databricks_sql_access` | `workspace:access`, `sql:access`, `shared_directory:manage` | Default group for all workspace users — grants SQL and workspace access entitlements |
 | **Consumer Access** | `consumer_access` | `workspace:manage`, `token:manage`, `cluster:manage`, `job:manage`, `unity_catalog:manage` | Default group for workspace admins — management over tokens, clusters, jobs, and Unity Catalog |
+
+---
+
+## The 3-Layer Access Model
+
+Entitlements, compute, and data access are **three completely independent permission systems**. All three must be granted — missing any one layer blocks end-to-end access.
+
+```mermaid
+flowchart TD
+    subgraph Layer1["Layer 1 — UI Access (Entitlements)"]
+        WA["Workspace Access<br/>Opens notebook and job UI"]
+        SA["SQL Access<br/>Opens SQL editor and dashboard UI"]
+    end
+
+    subgraph Layer2["Layer 2 — Compute Access"]
+        CL["Cluster<br/>CAN ATTACH TO / CAN RESTART / CAN MANAGE"]
+        WH["SQL Warehouse<br/>CAN USE / CAN MONITOR / CAN MANAGE"]
+    end
+
+    subgraph Layer3["Layer 3 — Data Access (Unity Catalog)"]
+        UC1["USE CATALOG"]
+        UC2["USE SCHEMA"]
+        UC3["SELECT / MODIFY / EXECUTE"]
+    end
+
+    WA --> CL
+    SA --> WH
+    CL --> UC1
+    WH --> UC1
+    UC1 --> UC2
+    UC2 --> UC3
+```
+
+| Layer | What it controls | Without it |
+|---|---|---|
+| **Entitlement** | Which UI persona you can open | Cannot see SQL editor or notebook UI at all |
+| **Compute ACL** | Which warehouse or cluster you can run on | Can open the UI but get error when executing anything |
+| **Unity Catalog** | Which data you can read or write | Can run queries but get permission denied or table not found |
+
+### End-to-End Access Examples
+
+**Analyst running a SQL query — needs all 3:**
+
+| Step | Permission Required | Layer |
+|---|---|---|
+| Open SQL Editor | `databricks_sql_access` entitlement | 1 — UI |
+| Execute against a warehouse | `CAN USE` on SQL Warehouse | 2 — Compute |
+| See the catalog | `USE CATALOG` | 3 — Data |
+| See the schema | `USE SCHEMA` | 3 — Data |
+| Read the table | `SELECT` on table | 3 — Data |
+
+**Engineer running a notebook — needs all 3:**
+
+| Step | Permission Required | Layer |
+|---|---|---|
+| Open notebook UI | `workspace_access` entitlement | 1 — UI |
+| Run cells on a cluster | `CAN ATTACH TO` on cluster | 2 — Compute |
+| See the catalog | `USE CATALOG` | 3 — Data |
+| See the schema | `USE SCHEMA` | 3 — Data |
+| Read the table | `SELECT` on table | 3 — Data |
+
+| What you have | What you can do |
+|---|---|
+| Entitlement only | Open the UI, nothing else |
+| Entitlement + Compute | Run code, but queries fail with no data access |
+| Entitlement + Compute + Catalog | Full end-to-end access |
+| Compute + Catalog (no entitlement) | Cannot open the right UI persona |
 
 ---
 
@@ -791,6 +910,136 @@ flowchart LR
 |---|---|
 | Full inventory refresh | Every 24 hours (default) |
 | Workflow timeout | 6 hours |
+
+---
+
+## Who Can Be Granted Permissions (by Resource)
+
+For each resource, this shows which identity types — User, Service Principal (SP), and Group — can be assigned permissions.
+
+### Object-Level Resources
+
+```mermaid
+flowchart LR
+    subgraph AllThree["User + SP + Group"]
+        R1["Folder"]
+        R2["Git Folder"]
+        R3["Notebook"]
+        R4["File"]
+        R5["Query"]
+        R6["Dashboard"]
+        R7["Genie Space"]
+        R8["Alert / Legacy Alert"]
+        R9["MLflow Experiment"]
+    end
+
+    subgraph OwnerException["User + SP + Group\n(except IS OWNER — no Groups)"]
+        R10["ETL Pipeline"]
+        R11["Jobs"]
+        R12["SQL Warehouse"]
+    end
+```
+
+| Resource | User | Service Principal | Group | Notes |
+|---|---|---|---|---|
+| **Folder** | ✓ | ✓ | ✓ | |
+| **Git Folder** | ✓ | ✓ | ✓ | |
+| **Notebook** | ✓ | ✓ | ✓ | |
+| **File** | ✓ | ✓ | ✓ | |
+| **Query** | ✓ | ✓ | ✓ | |
+| **Dashboard** | ✓ | ✓ | ✓ | |
+| **Genie Space** | ✓ | ✓ | ✓ | |
+| **ETL Pipeline** | ✓ | ✓ | ✓ | Groups cannot hold `IS OWNER` |
+| **Alert / Legacy Alert** | ✓ | ✓ | ✓ | |
+| **MLflow Experiment** | ✓ | ✓ | ✓ | |
+
+---
+
+### Compute Resources
+
+| Resource | User | Service Principal | Group | Notes |
+|---|---|---|---|---|
+| **Cluster** | ✓ | ✓ | ✓ | |
+| **SQL Warehouse** | ✓ | ✓ | ✓ | Groups cannot hold `IS OWNER` |
+| **Instance Pool** | ✓ | ✓ | ✓ | |
+| **Cluster Policy** | ✓ | ✓ | ✓ | `CAN USE` only |
+| **Jobs** | ✓ | ✓ | ✓ | Groups cannot hold `IS OWNER` |
+
+---
+
+### Account and Workspace Roles
+
+| Resource | User | Service Principal | Group | Notes |
+|---|---|---|---|---|
+| **Account Admin** | ✓ | ✓ | — | Assigned directly to identities only |
+| **Marketplace Admin** | ✓ | ✓ | — | |
+| **Billing Admin** | ✓ | ✓ | — | |
+| **Workspace Creator** | ✓ | ✓ | — | |
+| **Workspace Manager** | ✓ | ✓ | — | |
+| **Workspace Entitlements** | ✓ | ✓ | ✓ | Groups are the recommended way to assign at scale |
+
+---
+
+### Unity Catalog
+
+| Resource | User | Service Principal | Group | Notes |
+|---|---|---|---|---|
+| **Catalog** | ✓ | ✓ | ✓ | |
+| **Schema** | ✓ | ✓ | ✓ | |
+| **Table / View** | ✓ | ✓ | ✓ | |
+| **Volume** | ✓ | ✓ | ✓ | |
+| **Function / Model** | ✓ | ✓ | ✓ | |
+
+---
+
+### Security and Infrastructure
+
+| Resource | User | Service Principal | Group | Notes |
+|---|---|---|---|---|
+| **Secret Scope** | ✓ | ✓ | ✓ | |
+| **Model Serving Endpoint** | ✓ | ✓ | ✓ | |
+| **Token Management** | ✓ | ✓ | — | Tokens belong to individual identities only |
+| **IP Access List** | — | — | — | Workspace Admin setting only — not assignable per identity |
+
+---
+
+### IS OWNER — Groups Never Allowed
+
+`IS OWNER` is a special permission that groups can never hold, regardless of resource:
+
+```mermaid
+flowchart LR
+    U["User"] -->|"can be IS OWNER"| J["Jobs"]
+    SP["Service Principal"] -->|"can be IS OWNER"| J
+    G["Group"] -->|"CANNOT be IS OWNER"| J
+
+    U -->|"can be IS OWNER"| E["ETL Pipeline"]
+    SP -->|"can be IS OWNER"| E
+    G -->|"CANNOT be IS OWNER"| E
+
+    U -->|"can be IS OWNER"| W["SQL Warehouse"]
+    SP -->|"can be IS OWNER"| W
+    G -->|"CANNOT be IS OWNER"| W
+```
+
+---
+
+### Pattern Summary
+
+```mermaid
+flowchart TD
+    P1["User + SP + Group<br/>All object resources, compute,<br/>Unity Catalog, secret scopes,<br/>model serving, workspace entitlements"]
+    P2["User + SP only<br/>All account-level roles,<br/>token management"]
+    P3["User + SP + Group<br/>except IS OWNER = no Groups<br/>Jobs, ETL Pipelines, SQL Warehouses"]
+    P4["Admin only<br/>Not assignable per identity<br/>IP Access Lists"]
+```
+
+| Pattern | Resources |
+|---|---|
+| **User + SP + Group** | All object-level resources, compute, Unity Catalog, secret scopes, model serving |
+| **User + SP only** | All account-level roles, token management |
+| **User + SP + Group (except IS OWNER)** | Jobs, ETL Pipelines, SQL Warehouses |
+| **Admin only — not assignable** | IP Access Lists |
 
 ---
 
