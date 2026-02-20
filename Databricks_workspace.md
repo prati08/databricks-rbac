@@ -80,52 +80,186 @@ flowchart TD
 
 ---
 
-## Resource-Level ACLs (Who Can Access What)
+## Workspace Resources — Who Can Access What
 
-### Compute, Notebooks and Jobs
+These are the resources creatable from the Databricks workspace UI. For each resource, permissions are listed from least to most privileged.
 
 ```mermaid
 flowchart LR
-    subgraph Clusters
+    subgraph FolderGit["Folder / Git Folder"]
         direction TB
-        C1["CAN ATTACH TO<br/>Connect and run commands"] --> C2["CAN RESTART<br/>Restart and run jobs"] --> C3["CAN MANAGE<br/>Full control"]
+        FG1["CAN VIEW<br/>Browse, read contents"] --> FG2["CAN EDIT<br/>Add, move objects"] --> FG3["CAN MANAGE<br/>Rename, delete, permissions"]
     end
 
     subgraph Notebooks
         direction TB
-        N1["CAN VIEW<br/>Read only"] --> N2["CAN RUN<br/>Execute"] --> N3["CAN EDIT<br/>Modify"] --> N4["CAN MANAGE<br/>Full control"]
+        N1["CAN VIEW<br/>Read only"] --> N2["CAN RUN<br/>Execute cells"] --> N3["CAN EDIT<br/>Modify content"] --> N4["CAN MANAGE<br/>Share, delete, permissions"]
     end
 
-    subgraph Jobs
+    subgraph FileRes["File"]
         direction TB
-        J1["CAN VIEW<br/>View details and logs"] --> J2["CAN MANAGE RUN<br/>Trigger and cancel"] --> J3["IS OWNER<br/>Edit settings"] --> J4["CAN MANAGE<br/>Full control"]
+        FL1["CAN VIEW<br/>Read content"] --> FL2["CAN EDIT<br/>Modify file"] --> FL3["CAN MANAGE<br/>Delete, permissions"]
     end
 ```
 
-### SQL, Dashboards, Queries and Alerts
-
 ```mermaid
 flowchart LR
-    subgraph Warehouses["SQL Warehouses"]
+    subgraph Queries
         direction TB
-        S1["CAN VIEW"] --> S2["CAN MONITOR"] --> S3["CAN USE<br/>Execute queries"] --> S4["IS OWNER"] --> S5["CAN MANAGE<br/>Full control"]
+        Q1["CAN VIEW<br/>View query and results"] --> Q2["CAN RUN<br/>Execute, change params"] --> Q3["CAN EDIT<br/>Modify SQL"] --> Q4["CAN MANAGE<br/>Delete, permissions"]
     end
 
     subgraph Dashboards
         direction TB
-        D1["CAN VIEW / CAN RUN<br/>View and refresh"] --> D2["CAN EDIT<br/>Modify layout"] --> D3["CAN MANAGE<br/>Full control"]
+        D1["CAN VIEW / CAN RUN<br/>View, refresh, clone"] --> D2["CAN EDIT<br/>Modify layout"] --> D3["CAN MANAGE<br/>Delete, permissions"]
     end
 
-    subgraph Queries
+    subgraph GenieSpace["Genie Space"]
         direction TB
-        Q1["CAN VIEW<br/>View results"] --> Q2["CAN RUN<br/>Refresh and parameterize"] --> Q3["CAN EDIT<br/>Modify query"] --> Q4["CAN MANAGE<br/>Full control"]
-    end
-
-    subgraph Alerts
-        direction TB
-        A1["CAN VIEW<br/>View details"] --> A2["CAN RUN<br/>Trigger and subscribe"] --> A3["CAN MANAGE<br/>Edit and delete"]
+        GS1["CAN VIEW<br/>Ask questions, view results"] --> GS2["CAN EDIT<br/>Configure data sources"] --> GS3["CAN MANAGE<br/>Delete, permissions"]
     end
 ```
+
+```mermaid
+flowchart LR
+    subgraph ETLPipeline["ETL Pipeline"]
+        direction TB
+        E1["CAN VIEW<br/>View definition, run history"] --> E2["CAN RUN<br/>Start, stop, restart"] --> E3["IS OWNER<br/>Edit settings, change compute"] --> E4["CAN MANAGE<br/>Delete, permissions"]
+    end
+
+    subgraph AlertRes["Alert / Legacy Alert"]
+        direction TB
+        AL1["CAN VIEW<br/>View alert and results"] --> AL2["CAN RUN<br/>Trigger, subscribe"] --> AL3["CAN MANAGE<br/>Edit conditions, delete"]
+    end
+
+    subgraph MLflow["MLflow Experiment"]
+        direction TB
+        ML1["CAN READ<br/>View runs, metrics, artifacts"] --> ML2["CAN EDIT<br/>Log runs, update tags"] --> ML3["CAN MANAGE<br/>Delete, permissions"]
+    end
+```
+
+### Folder
+
+| Permission | Can Do | Auto-granted To |
+|---|---|---|
+| `CAN VIEW` | Browse folder, see child objects | — |
+| `CAN EDIT` | Add/move objects inside folder | — |
+| `CAN MANAGE` | Rename, delete, set permissions | Creator, Workspace Admin |
+
+> Child objects **inherit** all permissions from their parent folder.
+
+### Git Folder
+
+| Permission | Can Do | Auto-granted To |
+|---|---|---|
+| `CAN VIEW` | Read files, view commit history | — |
+| `CAN EDIT` | Pull, commit, push changes | — |
+| `CAN MANAGE` | Delete, change remote URL, set permissions | Creator, Workspace Admin |
+
+> Only the **creator** can manage Git credentials. Workspace Admins can manage all Git folders.
+
+### Notebook
+
+| Permission | Can Do | Auto-granted To |
+|---|---|---|
+| `CAN VIEW` | Read notebook content | — |
+| `CAN RUN` | Execute cells, cannot edit | — |
+| `CAN EDIT` | Modify notebook content | — |
+| `CAN MANAGE` | Share, delete, set permissions | Creator, Workspace Admin |
+
+### File
+
+| Permission | Can Do | Auto-granted To |
+|---|---|---|
+| `CAN VIEW` | Read file content | — |
+| `CAN EDIT` | Modify file | — |
+| `CAN MANAGE` | Delete, set permissions | Creator, Workspace Admin |
+
+### Query
+
+| Permission | Can Do | Auto-granted To |
+|---|---|---|
+| `CAN VIEW` | View query text and results | — |
+| `CAN RUN` | Execute query, change parameters | — |
+| `CAN EDIT` | Modify query SQL | — |
+| `CAN MANAGE` | Delete, set permissions | Creator, Workspace Admin |
+
+> Requires `CAN USE` on a SQL Warehouse to execute.
+
+### Dashboard
+
+| Permission | Can Do | Auto-granted To |
+|---|---|---|
+| `CAN VIEW` / `CAN RUN` | View results, refresh, clone | — |
+| `CAN EDIT` | Modify layout and widgets | — |
+| `CAN MANAGE` | Delete, set permissions | Creator, Workspace Admin |
+
+### Genie Space
+
+| Permission | Can Do | Auto-granted To |
+|---|---|---|
+| `CAN VIEW` | Ask natural language questions, view results | — |
+| `CAN EDIT` | Configure data sources and context | — |
+| `CAN MANAGE` | Delete, set permissions | Creator, Workspace Admin |
+
+> Underlying table access is still governed by **Unity Catalog** — users only see data they have `SELECT` on.
+
+### ETL Pipeline (Delta Live Tables)
+
+| Permission | Can Do | Auto-granted To |
+|---|---|---|
+| `CAN VIEW` | View pipeline definition and run history | — |
+| `CAN RUN` | Start, stop, and restart pipeline runs | — |
+| `IS OWNER` | Edit pipeline settings, change compute | Creator |
+| `CAN MANAGE` | Delete, set permissions | Workspace Admin |
+
+> Only `IS OWNER` or `CAN MANAGE` can modify pipeline configuration. One owner only; **cannot be a group**.
+
+### Alert / Legacy Alert
+
+| Permission | Can Do | Auto-granted To |
+|---|---|---|
+| `CAN VIEW` | See alert, view triggered results | — |
+| `CAN RUN` | Manually trigger, subscribe to notifications | — |
+| `CAN MANAGE` | Edit conditions, delete, set permissions | Creator, Workspace Admin |
+
+### MLflow Experiment
+
+| Permission | Can Do | Auto-granted To |
+|---|---|---|
+| `CAN READ` | View runs, metrics, parameters, artifacts | — |
+| `CAN EDIT` | Log runs, update metrics and tags | — |
+| `CAN MANAGE` | Delete experiment, set permissions | Creator, Workspace Admin |
+
+### Summary Matrix
+
+```mermaid
+flowchart TD
+    WA["Workspace Admin<br/>CAN MANAGE on ALL resources automatically"]
+    CR["Creator<br/>CAN MANAGE on own created resources"]
+    U["User / Service Principal<br/>Only explicitly granted permissions"]
+
+    WA --> CR --> U
+```
+
+| Resource | CAN VIEW | CAN RUN / EDIT | CAN MANAGE | IS OWNER |
+|---|---|---|---|---|
+| Folder | Browse contents | Add/move objects | Delete, permissions | — |
+| Git Folder | Read, history | Pull/push commits | Delete, credentials | — |
+| Notebook | Read only | Run / Modify | Share, delete | — |
+| File | Read only | — / Modify | Delete | — |
+| Query | View results | Run / Modify SQL | Delete | — |
+| Dashboard | View, clone | — / Modify layout | Delete | — |
+| Genie Space | Ask questions | — / Configure | Delete | — |
+| ETL Pipeline | View runs | Run / — | Delete | Edit settings |
+| Alert | View results | Subscribe / — | Edit, delete | — |
+| MLflow Experiment | View runs | — / Log runs | Delete | — |
+
+**Universal rules:**
+- **Workspace Admins** get `CAN MANAGE` on all resources automatically
+- **Creators** get `CAN MANAGE` on objects they create
+- **Groups cannot** hold `IS OWNER` on any resource
+- **Service Principals** can hold any permission level the same as users
 
 ### Clusters
 
@@ -136,15 +270,6 @@ flowchart LR
 | `CAN MANAGE` | Full control — configure, delete, modify permissions |
 
 > **Note**: Only `CAN MANAGE` users can view Spark driver logs by default. To allow `CAN ATTACH TO`/`CAN RESTART` users to see logs, a workspace admin must set `spark.databricks.acl.needAdminPermissionToViewLogs = false`.
-
-### Notebooks
-
-| Permission | Can Do |
-|---|---|
-| `CAN VIEW` | Read notebook content |
-| `CAN RUN` | Execute notebook commands |
-| `CAN EDIT` | Modify notebook content |
-| `CAN MANAGE` | Full control — share, delete, modify permissions |
 
 ### Jobs
 
@@ -166,31 +291,6 @@ flowchart LR
 | `CAN USE` | Execute queries on the warehouse |
 | `IS OWNER` | Warehouse creator — one owner only |
 | `CAN MANAGE` | Full administrative control |
-
-### Dashboards
-
-| Permission | Can Do |
-|---|---|
-| `CAN VIEW` / `CAN RUN` | View results, interact with widgets, refresh, clone |
-| `CAN EDIT` | Modify layout and content |
-| `CAN MANAGE` | Full control — modify access, delete |
-
-### Queries
-
-| Permission | Can Do |
-|---|---|
-| `CAN VIEW` | View query text and results |
-| `CAN RUN` | Refresh results, choose parameters, include in dashboards |
-| `CAN EDIT` | Modify query text |
-| `CAN MANAGE` | Full control — modify permissions, delete |
-
-### Alerts
-
-| Permission | Can Do |
-|---|---|
-| `CAN VIEW` | See alert in list, view details and results |
-| `CAN RUN` | Manually trigger runs, subscribe to notifications |
-| `CAN MANAGE` | Edit, delete, modify permissions |
 
 ---
 
